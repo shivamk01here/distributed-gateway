@@ -1,9 +1,9 @@
-// File: cmd/gateway/main.go
 package main
 
 import (
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/shivamk01here/distributed-gateway/internal/api"
@@ -11,29 +11,32 @@ import (
 )
 
 func main() {
-	log.Println("Connecting to Redis Cluster...")
-	// Connect to local Redis on port 6379
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr == "" {
+		redisAddr = "localhost:6379" // Fallback
+	}
+
+	backendURL := os.Getenv("BACKEND_URL")
+	if backendURL == "" {
+		backendURL = "http://localhost:9000" // Fallback
+	}
+
+	log.Printf("Connecting to Redis Cluster at %s...", redisAddr)
 	rdb := redis.NewClient(&redis.Options{
-		Addr: "localhost:6379",
+		Addr: redisAddr,
 	})
 
 	log.Println("Initializing Distributed Redis Rate Limiter...")
-	// 5 tokens max, 1 token refill per second
 	redisLimiter := limiter.NewRedisTokenBucket(rdb, 5, 1.0)
 
-	log.Println("Configuring Reverse Proxy routing...")
-	// send allowed traffic to our backend service running on port 9000
-	backendServiceURL := "http://localhost:9000"
-	proxyHandler := api.NewReverseProxy(backendServiceURL)
-
-	// Wrap the proxy handler with our Redis rate limiting middleware
+	log.Printf("Configuring Reverse Proxy routing to %s...", backendURL)
+	proxyHandler := api.NewReverseProxy(backendURL)
 	gatewayRouter := api.RateLimitMiddleware(redisLimiter, proxyHandler)
 
-	// root route so the gateway catches everything
 	http.HandleFunc("/", gatewayRouter)
 
 	port := ":8080"
-	log.Printf("🔥 Distributed API Gateway live on port %s forwarding to %s\n", port, backendServiceURL)
+	log.Printf("Distributed API Gateway live on port %s\n", port)
 	if err := http.ListenAndServe(port, nil); err != nil {
 		log.Fatalf("Gateway crashed: %v", err)
 	}
