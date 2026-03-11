@@ -1,3 +1,4 @@
+# File: docker-compose.yml
 version: '3.8'
 
 services:
@@ -8,38 +9,33 @@ services:
     networks:
       - gateway_network
 
-  backend_service:
+  # Backend 1
+  backend_alpha:
     image: jmalloc/echo-server
-    ports:
-      - "9000:8080"
+    environment:
+      - PORT=8080
     networks:
       - gateway_network
 
-  # 3. Gateway Node 1
-  gateway_alpha:
+  # Backend 2
+  backend_beta:
+    image: jmalloc/echo-server
+    environment:
+      - PORT=8080
+    networks:
+      - gateway_network
+
+  # Our API Gateway
+  gateway:
     build: .
     ports:
       - "8080:8080"
     environment:
       - REDIS_ADDR=redis:6379
-      - BACKEND_URL=http://backend_service:8080
     depends_on:
       - redis
-      - backend_service
-    networks:
-      - gateway_network
-
-  # 4. Gateway Node 2 
-  gateway_beta:
-    build: .
-    ports:
-      - "8081:8080"
-    environment:
-      - REDIS_ADDR=redis:6379
-      - BACKEND_URL=http://backend_service:8080
-    depends_on:
-      - redis
-      - backend_service
+      - backend_alpha
+      - backend_beta
     networks:
       - gateway_network
 

@@ -1,3 +1,4 @@
+// File: internal/api/proxy.go
 package api
 
 import (
@@ -5,25 +6,50 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"sync/atomic"
 )
 
-// NewReverseProxy creates a handler that forwards requests to the target backend.
-func NewReverseProxy(targetHost string) http.HandlerFunc {
-	url, err := url.Parse(targetHost)
-	if err != nil {
-		log.Fatalf("Invalid backend URL: %v", err)
+type LoadBalancer struct {
+	backends []*url.URL
+	current  uint64
+}
+
+func NewLoadBalancer(targetHosts []string) *LoadBalancer {
+	var urls []*url.URL
+	for _, host := range targetHosts {
+		u, err := url.Parse(host)
+		if err != nil {
+			log.Fatalf("Invalid backend URL %s: %v", host, err)
+		}
+		urls = append(urls, u)
 	}
 
-	// Go's built-in reverse proxy handles (headers, chunking, etc.)
-	proxy := httputil.NewSingleHostReverseProxy(url)
+	return &LoadBalancer{
+		backends: urls,
+		current:  0,
+	}
+}
 
+func (lb *LoadBalancer) getNextBackend() *url.URL {
+	next := atomic.AddUint64(&lb.current, 1)
+
+	index := (next - 1) % uint64(len(lb.backends))
+
+	return lb.backends[index]
+}
+
+func (lb *LoadBalancer) ReverseProxyHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		r.URL.Host = url.Host
-		r.URL.Scheme = url.Scheme
-		r.Header.Set("X-Forwarded-Host", r.Header.Get("Host"))
-		r.Host = url.Host
+		target := lb.getNextBackend()
 
-		log.Printf("[PROXY] Forwarding request to %s%s", targetHost, r.URL.Path)
+		proxy := httputil.NewSingleHostReverseProxy(target)
+
+		r.URL.Host = target.Host
+		r.URL.Scheme = target.Scheme
+		r.Header.Set("X-Forwarded-Host", r.Header.Get("Host"))
+		r.Host = target.Host
+
+		log.Printf("[PROXY] Load Balancing request to -> %s", target.Host)
 		proxy.ServeHTTP(w, r)
 	}
 }
