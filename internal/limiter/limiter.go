@@ -1,5 +1,5 @@
 package limiter
 
 type RateLimiter interface {
-	Allow() bool
+	Allow(key string) bool
 }
